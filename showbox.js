@@ -1,4 +1,3 @@
-require('dotenv').config();
 const axios = require('axios');
 
 const TMDB_API_KEY = process.env.TMDB_API_KEY || '439c478a771f35c05022f9feabcca01c';
