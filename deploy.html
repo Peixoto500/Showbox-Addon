@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deploy ShowBox Proxy</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,sans-serif;background:#0f0f0f;color:#e0e0e0;padding:20px;min-height:100vh}
+  h1{color:#fff;margin-bottom:6px;font-size:22px}
+  p{color:#999;font-size:14px;margin-bottom:20px}
+  .card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:18px;margin-bottom:16px}
+  .card h3{color:#bbb;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px}
+  label{display:block;font-size:13px;color:#aaa;margin-bottom:6px}
+  input{width:100%;background:#111;border:1px solid #333;border-radius:8px;padding:12px;color:#fff;font-size:14px;outline:none}
+  input:focus{border-color:#7b5ea7}
+  .btn{width:100%;padding:14px;background:#7b5ea7;color:#fff;border:none;border-radius:10px;font-size:16px;cursor:pointer;margin-top:8px}
+  .btn:disabled{background:#444;cursor:not-allowed}
+  .status{margin-top:16px;padding:14px;border-radius:10px;font-size:14px;display:none}
+  .ok{background:#1e3d1e;border:1px solid #2a5a2a;color:#7dbb7d}
+  .err{background:#3d1e1e;border:1px solid #5a2a2a;color:#bb7d7d}
+  .info{background:#1e1e3d;border:1px solid #2a2a5a;color:#7d7dbb}
+  code{background:#111;padding:2px 6px;border-radius:4px;font-size:12px;word-break:break-all}
+  a{color:#9b79d4}
+  ol{padding-left:18px;line-height:2;font-size:14px;color:#bbb}
+  .step{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .num{background:#7b5ea7;color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+</style>
+</head>
+<body>
+
+<h1>🚀 Deploy ShowBox Proxy</h1>
+<p>Automatically deploys a Cloudflare Worker proxy in seconds.</p>
+
+<div class="card">
+  <h3>Step 1 — Get your Cloudflare details</h3>
+  <div class="step"><div class="num">1</div><span>Go to <a href="https://dash.cloudflare.com" target="_blank">dash.cloudflare.com</a></span></div>
+  <div class="step"><div class="num">2</div><span>Copy your <strong>Account ID</strong> from the right sidebar on the home page</span></div>
+  <div class="step"><div class="num">3</div><span>Go to <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank">API Tokens</a> → <strong>Create Token</strong> → use the <strong>"Edit Cloudflare Workers"</strong> template → Create</span></div>
+  <div class="step"><div class="num">4</div><span>Copy the token shown (only shown once!)</span></div>
+</div>
+
+<div class="card">
+  <h3>Step 2 — Deploy</h3>
+  <label>Account ID</label>
+  <input id="accountId" type="text" placeholder="e.g. a1b2c3d4e5f6..." autocomplete="off" autocorrect="off" spellcheck="false">
+  <br><br>
+  <label>API Token</label>
+  <input id="apiToken" type="password" placeholder="Paste your API token here" autocomplete="off">
+  <button class="btn" id="deployBtn" onclick="deploy()">⚡ Deploy Proxy</button>
+</div>
+
+<div class="status ok" id="successBox">
+  ✅ <strong>Proxy deployed!</strong><br><br>
+  Your proxy URL:<br>
+  <code id="proxyUrl"></code><br><br>
+  Now add these two secrets to your HuggingFace Space:<br><br>
+  <strong>SHOWBOX_PROXY_URL</strong><br>
+  <code id="showboxProxy"></code><br><br>
+  <strong>FEBBOX_PROXY_URL</strong><br>
+  <code id="febboxProxy"></code>
+</div>
+
+<div class="status err" id="errorBox">
+  ❌ <strong>Error:</strong> <span id="errorMsg"></span>
+</div>
+
+<div class="status info" id="loadingBox">
+  ⏳ Deploying... please wait
+</div>
+
+<script>
+const WORKER_CODE = `export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const destination = url.searchParams.get("destination");
+    if (!destination) {
+      return new Response("Missing destination", { status: 400 });
+    }
+    const targetUrl = decodeURIComponent(destination);
+    const res = await fetch(targetUrl, {
+      headers: {
+        "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 11; Pixel 5 Build/RQ3A.210805.001)",
+        "X-Requested-With": "com.tdo.showbox",
+        "Accept": "application/json",
+      },
+    });
+    const body = await res.text();
+    return new Response(body, {
+      status: res.status,
+      headers: {
+        "Content-Type": res.headers.get("Content-Type") || "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+  },
+};`;
+
+async function deploy() {
+  const accountId = document.getElementById('accountId').value.trim();
+  const apiToken  = document.getElementById('apiToken').value.trim();
+
+  if (!accountId || !apiToken) {
+    showError('Please fill in both fields.');
+    return;
+  }
+
+  document.getElementById('deployBtn').disabled = true;
+  hide('successBox'); hide('errorBox');
+  show('loadingBox');
+
+  try {
+    // Call our server-side endpoint to avoid CORS issues
+    const res = await fetch('/deploy-worker', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountId, apiToken }),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Deploy failed');
+    const proxyUrl = data.proxyUrl;
+
+    document.getElementById('proxyUrl').textContent = proxyUrl;
+    document.getElementById('showboxProxy').textContent = `${proxyUrl}/?destination=`;
+    document.getElementById('febboxProxy').textContent = `${proxyUrl}/?destination=`;
+
+    hide('loadingBox');
+    show('successBox');
+
+  } catch (err) {
+    hide('loadingBox');
+    showError(err.message);
+  }
+
+  document.getElementById('deployBtn').disabled = false;
+}
+
+function show(id) { document.getElementById(id).style.display = 'block'; }
+function hide(id) { document.getElementById(id).style.display = 'none'; }
+function showError(msg) { document.getElementById('errorMsg').textContent = msg; show('errorBox'); }
+</script>
+</body>
+</html>
